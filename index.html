@@ -1,0 +1,1832 @@
+<meta charset="utf-8" />
+<title>Figma Component Factory</title>
+<meta name="description" content="A canvas walk-through of the Figma component factory: getting the design to the agent, getting the agent to build well, and where it goes next." />
+<style>
+  /* Layout: one continuous dark canvas. Three chapter lanes flow left to right,
+     a single path threads every stop, and a camera flies between them. */
+  :root {
+    color-scheme: dark;
+    --ink: #f4f7fb;
+    --muted: #9aa8bb;
+    --muted-strong: #c6d0dc;
+    --canvas: #07111f;
+    --canvas-deep: #040b14;
+    --panel: #101e31;
+    --panel-soft: rgba(16, 30, 49, 0.72);
+    --line: rgba(176, 202, 231, 0.16);
+    --line-bright: rgba(176, 202, 231, 0.34);
+    --grid: rgba(255, 255, 255, 0.035);
+    --cyan: #6ee7f9;
+    --blue: #72a7ff;
+    --violet: #b39bff;
+    --green: #86efb4;
+    --amber: #ffd27d;
+    --red: #ff8e9e;
+    --paper: #ffffff;
+    --bar: rgba(4, 11, 20, 0.86);
+    --mono: "SFMono-Regular", ui-monospace, Menlo, Consolas, "Liberation Mono", monospace;
+    --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --fly: 950ms cubic-bezier(0.65, 0, 0.2, 1);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+
+  html, body { height: 100%; }
+
+  body {
+    margin: 0;
+    overflow: hidden;
+    color: var(--ink);
+    background:
+      radial-gradient(circle at 8% 0%, rgba(71, 128, 255, 0.19), transparent 27rem),
+      radial-gradient(circle at 94% 10%, rgba(146, 97, 255, 0.17), transparent 25rem),
+      linear-gradient(180deg, var(--canvas) 0%, var(--canvas-deep) 100%);
+    background-color: var(--canvas);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  /* ---------- chrome ---------- */
+
+  .topbar, .bottombar {
+    position: fixed;
+    right: 0;
+    left: 0;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding-inline: 20px;
+    background: var(--bar);
+    backdrop-filter: blur(18px);
+  }
+
+  .topbar {
+    top: 0;
+    height: calc(56px + env(safe-area-inset-top, 0px));
+    padding-top: env(safe-area-inset-top, 0px);
+    border-bottom: 1px solid var(--line);
+  }
+
+  .bottombar {
+    bottom: 0;
+    height: calc(60px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    border-top: 1px solid var(--line);
+  }
+
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--muted-strong);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .brand-mark {
+    width: 22px;
+    height: 22px;
+    border: 1px solid rgba(110, 231, 249, 0.65);
+    border-radius: 7px;
+    background:
+      linear-gradient(135deg, transparent 42%, rgba(110, 231, 249, 0.9) 43% 54%, transparent 55%),
+      linear-gradient(45deg, transparent 42%, rgba(114, 167, 255, 0.85) 43% 54%, transparent 55%);
+    box-shadow: 0 0 22px rgba(110, 231, 249, 0.2);
+  }
+
+  .chapter-label {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .progress {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    min-width: 0;
+    flex: 1 1 0;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+
+  .progress strong { color: var(--ink); font-size: 13px; font-variant-numeric: tabular-nums; }
+  .progress span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .dots { display: flex; align-items: center; gap: 6px; }
+
+  .dot {
+    width: 7px;
+    height: 7px;
+    padding: 0;
+    border: 1px solid var(--muted);
+    border-radius: 50%;
+    background: transparent;
+    cursor: pointer;
+    transition: width 180ms ease, background 180ms ease, border-color 180ms ease;
+  }
+
+  .dot.chapter-start { margin-left: 10px; }
+  .dot.seen { border-color: var(--cyan); background: rgba(110, 231, 249, 0.35); }
+
+  .dot.active {
+    width: 22px;
+    border-color: var(--cyan);
+    border-radius: 999px;
+    background: var(--cyan);
+    box-shadow: 0 0 12px rgba(110, 231, 249, 0.45);
+  }
+
+  .controls { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex: 1 1 0; }
+
+  .hint { color: var(--muted); font-family: var(--mono); font-size: 10px; white-space: nowrap; }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 36px;
+    height: 32px;
+    padding: 0 10px;
+    border: 1px solid var(--line-bright);
+    border-radius: 9px;
+    color: var(--muted-strong);
+    background: var(--panel-soft);
+    font-family: var(--mono);
+    font-size: 12px;
+    cursor: pointer;
+    transition: border-color 180ms ease, color 180ms ease, background 180ms ease;
+  }
+
+  .btn:hover, .btn:focus-visible, .dot:focus-visible {
+    border-color: var(--cyan);
+    color: var(--ink);
+    background: rgba(110, 231, 249, 0.1);
+    outline: none;
+  }
+
+  .btn:disabled { border-color: var(--line); color: #4f6176; cursor: not-allowed; background: transparent; }
+
+  /* ---------- stage, world, camera ---------- */
+
+  #stage {
+    position: fixed;
+    top: calc(56px + env(safe-area-inset-top, 0px));
+    right: 0;
+    bottom: calc(60px + env(safe-area-inset-bottom, 0px));
+    left: 0;
+    overflow: hidden;
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  #stage.dragging { cursor: grabbing; }
+
+  #world {
+    position: absolute;
+    top: 0;
+    left: 0;
+    transform-origin: 0 0;
+    transition: transform var(--fly);
+    font-size: 18px;
+  }
+
+  #world.no-anim { transition: none; }
+
+  #world::before {
+    position: absolute;
+    inset: -2400px;
+    z-index: -1;
+    content: "";
+    pointer-events: none;
+    background-image:
+      linear-gradient(var(--grid) 1.5px, transparent 1.5px),
+      linear-gradient(90deg, var(--grid) 1.5px, transparent 1.5px);
+    background-size: 64px 64px;
+  }
+
+  #paths { position: absolute; top: 0; left: 0; overflow: visible; pointer-events: none; }
+
+  .path {
+    fill: none;
+    stroke: var(--line-bright);
+    stroke-width: 2.5;
+    stroke-dasharray: 7 8;
+    stroke-linecap: round;
+    vector-effect: non-scaling-stroke;
+    transition: stroke 400ms ease;
+  }
+
+  .path-tip { fill: var(--line-bright); transition: fill 400ms ease; }
+  .path.done { stroke: var(--cyan); }
+  .path-tip.done { fill: var(--cyan); }
+
+  .lane { display: contents; }
+
+  .stop {
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    gap: 34px;
+    transition: opacity 500ms ease;
+  }
+
+  #world.touring .stop:not(.current) { opacity: 0.3; }
+
+  /* ---------- type ---------- */
+
+  h1, h2, h3, p, ul, figure { margin: 0; }
+  h1, h2, h3 { text-wrap: balance; }
+
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 16px;
+    color: var(--cyan);
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+  }
+
+  .eyebrow::before {
+    width: 30px;
+    height: 1px;
+    content: "";
+    background: var(--cyan);
+    box-shadow: 0 0 12px var(--cyan);
+  }
+
+  .eyebrow.problem { color: var(--red); }
+  .eyebrow.problem::before { background: var(--red); box-shadow: 0 0 12px var(--red); }
+  .eyebrow.fix { color: var(--green); }
+  .eyebrow.fix::before { background: var(--green); box-shadow: 0 0 12px var(--green); }
+
+  h1 { font-size: 104px; font-weight: 700; letter-spacing: -0.045em; line-height: 0.98; }
+  h2 { font-size: 50px; font-weight: 700; letter-spacing: -0.03em; line-height: 1.05; }
+  h3 { font-size: 26px; letter-spacing: -0.025em; line-height: 1.1; }
+
+  .gradient-text {
+    color: var(--cyan);
+    background: linear-gradient(100deg, var(--cyan), var(--blue) 48%, var(--violet));
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .head { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 48px; align-items: end; }
+  .head p, .lede { color: var(--muted-strong); font-size: 19px; line-height: 1.55; }
+  .head p strong, .lede strong { color: var(--ink); font-weight: 600; }
+
+  code, .mono { font-family: var(--mono); font-size: 0.88em; color: var(--cyan); }
+
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; align-items: center; }
+  .cols.wide-right { grid-template-columns: 0.8fr 1.2fr; }
+  .cols.wide-left { grid-template-columns: 1.2fr 0.8fr; }
+  .cols.top { align-items: start; }
+  .cols > *, .head > * { min-width: 0; }
+  .stack { display: flex; flex-direction: column; gap: 26px; }
+
+  .ticks { display: grid; gap: 12px; padding: 0; list-style: none; }
+
+  .ticks li { position: relative; padding-left: 24px; color: var(--muted-strong); font-size: 17px; }
+
+  .ticks li::before {
+    position: absolute;
+    top: 0.72em;
+    left: 0;
+    width: 11px;
+    height: 2px;
+    content: "";
+    background: var(--cyan);
+  }
+
+  .ticks.bad li::before { background: var(--red); }
+  .ticks.good li::before { background: var(--green); }
+
+  /* ---------- title + chapter stops ---------- */
+
+  .title-stop .lede { max-width: 760px; font-size: 23px; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 12px; }
+
+  .key {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    padding: 9px 13px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    color: var(--muted);
+    background: var(--panel-soft);
+    font-family: var(--mono);
+    font-size: 13px;
+  }
+
+  .key i { width: 16px; height: 12px; border: 1.5px solid var(--line-bright); border-radius: 4px; }
+  .key i.built { border-color: var(--cyan); box-shadow: 0 0 10px rgba(110, 231, 249, 0.4); }
+  .key i.blocked { border-color: var(--red); }
+  .key kbd { color: var(--ink); font-family: var(--mono); font-size: 13px; }
+
+  .chapter-stop { gap: 22px; }
+
+  .chapter-no {
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 20px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+  }
+
+  .chapter-stop h2 { font-size: 118px; letter-spacing: -0.045em; line-height: 0.98; }
+  .chapter-stop p { max-width: 640px; color: var(--muted-strong); font-size: 23px; }
+
+  /* ---------- frames (screenshots) ---------- */
+
+  .frame {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 14px;
+    border: 1px solid var(--line-bright);
+    border-radius: 18px;
+    background: rgba(6, 16, 28, 0.78);
+    box-shadow: 0 18px 45px rgba(0, 0, 0, 0.22);
+  }
+
+  .frame img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: 9px;
+    background: var(--paper);
+    cursor: zoom-in;
+    -webkit-user-drag: none;
+  }
+
+  .frame-label {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .frame-label strong { font-weight: 500; color: var(--cyan); }
+  .frame-label strong.bad { color: var(--red); }
+  .frame-label strong.good { color: var(--green); }
+  .frame figcaption { color: var(--muted); font-size: 15px; }
+  .frame.target { border-color: rgba(179, 155, 255, 0.5); }
+
+  .pairs { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+  .quad { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+  .quad.two { grid-template-columns: 1fr 1fr; }
+
+  /* ---------- diagrams ---------- */
+
+  .diagram {
+    padding: 34px;
+    border: 1px dashed var(--line);
+    border-radius: 22px;
+    background: rgba(16, 30, 49, 0.35);
+  }
+
+  .chain { display: flex; align-items: center; }
+
+  .node {
+    flex: 0 0 auto;
+    min-width: 168px;
+    padding: 22px 20px;
+    border: 1.5px solid var(--line-bright);
+    border-radius: 14px;
+    color: var(--ink);
+    background: var(--panel);
+    font-family: var(--mono);
+    font-size: 16px;
+    line-height: 1.3;
+    text-align: center;
+  }
+
+  .node small { display: block; margin-top: 5px; color: var(--muted); font-size: 12px; }
+
+  .node.built {
+    border-color: var(--cyan);
+    box-shadow: 0 0 0 4px rgba(110, 231, 249, 0.07), 0 0 28px rgba(110, 231, 249, 0.16);
+  }
+
+  .node.big { padding: 34px 26px; font-size: 20px; }
+
+  .node.icon { display: flex; flex-direction: column; align-items: center; gap: 12px; min-width: 150px; }
+
+  .node.icon img {
+    width: 62px;
+    height: 62px;
+    padding: 7px;
+    border-radius: 14px;
+    background: var(--paper);
+    object-fit: contain;
+  }
+
+  .node.thumb { width: 250px; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+  .node.thumb img { width: 100%; height: auto; border-radius: 8px; background: var(--paper); cursor: zoom-in; }
+
+  .wire {
+    position: relative;
+    flex: 1 1 60px;
+    min-width: 60px;
+    height: 2px;
+    margin: 0 9px;
+    background: var(--muted);
+  }
+
+  .wire::after, .wire.both::before {
+    position: absolute;
+    top: 50%;
+    width: 10px;
+    height: 10px;
+    border-top: 2px solid var(--muted);
+    border-right: 2px solid var(--muted);
+    content: "";
+  }
+
+  .wire::after { right: 0; transform: translateY(-50%) rotate(45deg); }
+  .wire.both::before { left: 0; transform: translateY(-50%) rotate(-135deg); }
+
+  .wire.built, .vwire.built { background: var(--cyan); }
+  .wire.built::after, .wire.built.both::before, .vwire.built::before, .vwire.built::after { border-color: var(--cyan); }
+
+  .wire-label {
+    position: absolute;
+    bottom: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  .wire.blocked { background: var(--red); }
+  .wire.blocked::after { border-color: var(--red); }
+
+  .wire.blocked .cross {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    display: grid;
+    place-items: center;
+    width: 46px;
+    height: 46px;
+    border: 2px solid var(--red);
+    border-radius: 50%;
+    color: var(--red);
+    background: var(--canvas);
+    font-size: 20px;
+    font-weight: 700;
+    transform: translate(-50%, -50%);
+    box-shadow: 0 0 26px rgba(255, 142, 158, 0.3);
+  }
+
+  .vwire { position: relative; width: 2px; height: 54px; margin: 8px auto; background: var(--muted); }
+
+  .vwire::before, .vwire::after {
+    position: absolute;
+    left: 50%;
+    width: 10px;
+    height: 10px;
+    border-top: 2px solid var(--muted);
+    border-right: 2px solid var(--muted);
+    content: "";
+  }
+
+  .vwire::before { top: 0; transform: translateX(-50%) rotate(-45deg); }
+  .vwire::after { bottom: 0; transform: translateX(-50%) rotate(135deg); }
+
+  .tee { display: grid; grid-template-columns: auto 1fr auto 1fr auto; align-items: center; }
+  .tee .under { grid-column: 3; }
+  .tee .left-of { grid-column: 1; }
+  .tee .wire-row { grid-column: 2; }
+
+  .branch { display: flex; flex-direction: column; gap: 18px; padding: 6px 0; border-left: 2px solid var(--muted); }
+  .branch .wire { flex: 0 0 56px; margin-left: 0; }
+
+  .fan { display: grid; gap: 14px; padding: 0; list-style: none; }
+
+  .fan li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 15px 18px;
+    border: 1.5px solid var(--line-bright);
+    border-radius: 12px;
+    background: var(--panel);
+    font-family: var(--mono);
+    font-size: 16px;
+  }
+
+  .fan .state { font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--green); }
+  .fan li.no { border-color: var(--red); }
+  .fan li.no .state { color: var(--red); }
+
+  /* ---------- stations ---------- */
+
+  .stations { display: grid; grid-template-columns: 1fr 64px 1fr 64px 1fr; align-items: center; row-gap: 0; }
+  .stations .wire { margin: 0 8px; min-width: 0; }
+
+  .station {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    align-self: stretch;
+    padding: 26px;
+    border: 1px solid var(--line-bright);
+    border-radius: 22px;
+    background: linear-gradient(160deg, rgba(21, 56, 79, 0.9), rgba(16, 30, 49, 0.9));
+  }
+
+  .station.build { background: linear-gradient(160deg, rgba(35, 44, 86, 0.88), rgba(16, 30, 49, 0.9)); }
+  .station.verify { background: linear-gradient(160deg, rgba(64, 42, 91, 0.82), rgba(16, 30, 49, 0.9)); }
+  .station-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+
+  .agent-icon {
+    flex: 0 0 auto;
+    width: 52px;
+    height: 52px;
+    padding: 6px;
+    border-radius: 14px;
+    background: var(--paper);
+    object-fit: contain;
+    box-shadow: 0 0 0 1px var(--line-bright), 0 8px 22px rgba(0, 0, 0, 0.3);
+  }
+
+  .station.monolith {
+    border-color: rgba(255, 142, 158, 0.6);
+    background: linear-gradient(160deg, rgba(86, 34, 54, 0.78), rgba(16, 30, 49, 0.9));
+    box-shadow: 0 0 0 4px rgba(255, 142, 158, 0.06), 0 0 32px rgba(255, 142, 158, 0.14);
+  }
+
+  .station.monolith code { color: var(--red); }
+  .jobs { display: flex; flex-wrap: wrap; gap: 8px; }
+
+  .jobs span {
+    padding: 6px 11px;
+    border: 1px solid rgba(255, 142, 158, 0.4);
+    border-radius: 999px;
+    color: var(--muted-strong);
+    background: rgba(255, 142, 158, 0.08);
+    font-family: var(--mono);
+    font-size: 13px;
+  }
+
+  .station h3 { font-size: 34px; }
+  .station p { color: var(--muted-strong); font-size: 16px; }
+
+  .station code {
+    display: block;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.2);
+    font-size: 14px;
+  }
+
+  .loop {
+    position: relative;
+    grid-column: 3 / 6;
+    height: 34px;
+    margin: 10px calc((100% - 64px) / 4) 0;
+    border: 2px dashed var(--amber);
+    border-top: 0;
+    border-radius: 0 0 16px 16px;
+  }
+
+  .loop::before {
+    position: absolute;
+    top: -2px;
+    left: -7px;
+    width: 10px;
+    height: 10px;
+    border-top: 2px solid var(--amber);
+    border-right: 2px solid var(--amber);
+    content: "";
+    transform: rotate(-45deg);
+  }
+
+  .loop-label {
+    grid-column: 3 / 6;
+    margin-top: 12px;
+    color: var(--amber);
+    font-family: var(--mono);
+    font-size: 14px;
+    text-align: center;
+  }
+
+  /* ---------- cards ---------- */
+
+  .card {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 30px;
+    border: 1px solid var(--line);
+    border-radius: 22px;
+    background: var(--panel-soft);
+  }
+
+  .card.next { border-color: rgba(134, 239, 180, 0.3); background: linear-gradient(150deg, rgba(21, 61, 61, 0.73), rgba(16, 30, 49, 0.78)); }
+  .card p { color: var(--muted-strong); font-size: 17px; }
+
+  .card.gone { border-color: rgba(255, 142, 158, 0.3); background: linear-gradient(150deg, rgba(69, 35, 53, 0.6), rgba(16, 30, 49, 0.78)); }
+  .trio { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+  .trio > * { min-width: 0; }
+
+  .link3 { display: grid; grid-template-columns: 1.3fr 130px 1fr; align-items: center; }
+  .link3 > * { min-width: 0; }
+  .shot-wrap { position: relative; }
+
+  .hl {
+    position: absolute;
+    border: 2.5px solid var(--cyan);
+    border-radius: 8px;
+    box-shadow: 0 0 0 4px rgba(110, 231, 249, 0.18), 0 0 22px rgba(110, 231, 249, 0.55);
+    pointer-events: none;
+  }
+
+  .small-shot { display: grid; place-items: center; padding: 34px 20px; border-radius: 9px; background: var(--paper); }
+  .frame .small-shot img { width: min(100%, 648px); border-radius: 0; }
+
+  .pending {
+    display: grid;
+    place-items: center;
+    aspect-ratio: 1440 / 1024;
+    padding: 16px;
+    border: 2px dashed var(--line-bright);
+    border-radius: 9px;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 15px;
+    text-align: center;
+  }
+
+  .tag { color: var(--muted); font-family: var(--mono); font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; }
+
+  .loop-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border: 1.5px dashed var(--amber);
+    border-radius: 999px;
+    color: var(--amber);
+    font-family: var(--mono);
+    font-size: 14px;
+  }
+
+  .loop-pill img { width: 30px; height: 30px; padding: 3px; border-radius: 8px; background: var(--paper); }
+
+  .takeaway h2 { font-size: 92px; letter-spacing: -0.045em; line-height: 1; }
+  .takeaway .lede { max-width: 720px; font-size: 22px; }
+
+  /* ---------- minimap ---------- */
+
+  #minimap {
+    position: fixed;
+    right: 16px;
+    bottom: calc(76px + env(safe-area-inset-bottom, 0px));
+    z-index: 9;
+    width: 230px;
+    padding: 8px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--bar);
+    backdrop-filter: blur(12px);
+  }
+
+  #minimap-inner { position: relative; overflow: hidden; }
+
+  .mm-stop {
+    position: absolute;
+    min-width: 3px;
+    min-height: 3px;
+    padding: 0;
+    border: 0;
+    border-radius: 2px;
+    background: rgba(176, 202, 231, 0.3);
+    cursor: pointer;
+  }
+
+  .mm-stop.seen { background: rgba(110, 231, 249, 0.5); }
+  .mm-stop.active { background: var(--cyan); box-shadow: 0 0 8px var(--cyan); }
+
+  #mm-view {
+    position: absolute;
+    border: 1px solid var(--amber);
+    border-radius: 2px;
+    pointer-events: none;
+    transition: left var(--fly), top var(--fly), width var(--fly), height var(--fly);
+  }
+
+  #mm-view.no-anim { transition: none; }
+
+  /* ---------- narrow canvas (phones) ---------- */
+
+  #world.narrow { font-size: 15px; }
+  .narrow .stop { gap: 22px; }
+  .narrow h1 { font-size: 50px; }
+  .narrow h2 { font-size: 31px; }
+  .narrow .chapter-stop h2 { font-size: 52px; }
+  .narrow .takeaway h2 { font-size: 42px; }
+  .narrow .head, .narrow .cols, .narrow .cols.wide-right, .narrow .cols.wide-left, .narrow .pairs { grid-template-columns: 1fr; gap: 20px; }
+  .narrow .quad { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .narrow .trio { grid-template-columns: 1fr; gap: 12px; }
+  .narrow .link3 { grid-template-columns: 1fr; }
+  .narrow .head p, .narrow .lede, .narrow .title-stop .lede, .narrow .chapter-stop p, .narrow .takeaway .lede { font-size: 16px; }
+  .narrow .diagram { padding: 16px; }
+  .narrow .node { min-width: 0; padding: 12px 8px; font-size: 12px; flex: 1 1 0; }
+  .narrow .node.big { font-size: 15px; padding: 20px 12px; }
+  .narrow .node small { font-size: 10px; }
+  .narrow .node.thumb { width: auto; }
+  .narrow .wire { flex: 0 0 26px; min-width: 26px; margin: 0 5px; }
+  .narrow .wire-label { font-size: 9px; }
+  .narrow .wire.blocked { flex-basis: 70px; }
+  .narrow .flip { flex-direction: column; align-items: stretch; }
+  .narrow .flip > .wire { flex: 0 0 34px; width: 2px; height: 34px; margin: 6px auto; }
+  .narrow .flip > .wire::after { top: auto; right: auto; bottom: 0; left: 50%; transform: translateX(-50%) rotate(135deg); }
+  .narrow .flip > .node { flex: 0 0 auto; }
+  .narrow .branch { border-left: 0; }
+  .narrow .stations { grid-template-columns: 1fr; }
+  .narrow .stations > .wire { width: 2px; height: 30px; margin: 6px auto; }
+  .narrow .stations > .wire::after { top: auto; right: auto; bottom: 0; left: 50%; transform: translateX(-50%) rotate(135deg); }
+  .narrow .loop { display: none; }
+  .narrow .loop-label { grid-column: 1; }
+  .narrow .card { padding: 20px; }
+  .narrow .fan li, .narrow .ticks li { font-size: 14px; }
+
+  @media (max-width: 900px) {
+    #minimap, .hint { display: none; }
+  }
+
+  @media (max-width: 720px) {
+    .dots, .chapter-label { display: none; }
+    .topbar, .bottombar { padding-inline: 16px; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    #world, #mm-view, .stop { transition: none; }
+  }
+</style>
+
+<header class="topbar">
+  <div class="brand"><span class="brand-mark" aria-hidden="true"></span>Figma component factory</div>
+  <div class="chapter-label" id="chapter-label">Progress update</div>
+</header>
+
+<main id="stage" aria-label="Figma component factory canvas">
+  <div id="world">
+    <svg id="paths" aria-hidden="true"></svg>
+
+    <!-- ============ Lane 1: getting the design to the agent ============ -->
+    <div class="lane" data-chapter="Chapter 1 / Getting the design to the agent">
+
+      <section class="stop title-stop" data-w="1320" data-title="The factory line" data-chapter="Progress update">
+        <div>
+          <div class="eyebrow">Figma component factory / progress update</div>
+          <h1>From one slow run to a <span class="gradient-text">factory line.</span></h1>
+        </div>
+        <p class="lede">
+          I tried to get an agent to build UI straight from Figma. This canvas is the map of
+          what broke, what I built to get around it, and where it is heading. Each stop leads
+          into the next.
+        </p>
+        <div class="legend">
+          <span class="key"><i class="built"></i>something I had to build</span>
+          <span class="key"><i class="blocked"></i>a hard blocker</span>
+          <span class="key"><kbd>→</kbd> follow the path</span>
+          <span class="key"><kbd>O</kbd> whole map</span>
+          <span class="key">drag and scroll to wander</span>
+        </div>
+      </section>
+
+      <section class="stop chapter-stop" data-w="900" data-dy="60" data-title="Chapter 1">
+        <div class="chapter-no">Chapter 1</div>
+        <h2>Getting the design <span class="gradient-text">to the agent.</span></h2>
+        <p>Before the agent could build anything, it had to see the Figma file. That took three workarounds.</p>
+      </section>
+
+      <section class="stop" data-w="1320" data-dy="-70" data-title="The target">
+        <div class="head">
+          <div>
+            <div class="eyebrow">The starting point</div>
+            <h2>One component. One agent. One run.</h2>
+          </div>
+          <p>
+            The target was a Bulk action bar: a real component with a selection count, actions,
+            a divider, and a destructive action. The plan was to let a single GitHub Agent read
+            the design, build it, and verify it.
+          </p>
+        </div>
+        <figure class="frame target">
+          <div class="frame-label"><span>Figma target</span><strong>Bulk action bar</strong></div>
+          <img src="assets/target-bulk-action-bar.png" width="1385" height="141" alt="Bulk action bar design: navy bar with a yellow selection badge, four buttons, a divider, Delete, and a close button" />
+        </figure>
+        <ul class="ticks" style="grid-template-columns: repeat(3, auto); justify-content: start; column-gap: 44px;">
+          <li>one workflow run</li>
+          <li>one agent context</li>
+          <li>one final pull request</li>
+        </ul>
+      </section>
+
+      <section class="stop" data-w="1240" data-dy="80" data-title="Blocked at the door">
+        <div class="head">
+          <div>
+            <div class="eyebrow problem">Problem 1 / access</div>
+            <h2>The agent could not reach Figma.</h2>
+          </div>
+          <p>
+            The official Figma MCP signs in with OAuth in a browser. A GitHub Agent runs headless,
+            with no browser and no session to reuse. Without the real design, it guessed.
+          </p>
+        </div>
+        <div class="diagram">
+          <div class="chain">
+            <div class="node big">GitHub Agent<small>headless workflow run</small></div>
+            <div class="wire blocked"><span class="cross" aria-label="blocked">✕</span></div>
+            <div class="node big">Figma MCP<small>browser OAuth sign-in</small></div>
+          </div>
+        </div>
+        <figure class="frame">
+          <div class="frame-label"><span>First result</span><strong class="bad">a guess, not the target</strong></div>
+          <div class="small-shot"><img src="assets/first-result.png" width="432" height="74" alt="First generated bulk action bar: plain unstyled text reading 2 selected, Archive, Export, a trash icon, and a close icon" /></div>
+          <figcaption>Built without seeing the design: a bare, unstyled bar with its own actions and none of the design system.</figcaption>
+        </figure>
+      </section>
+
+      <section class="stop" data-w="1320" data-dy="-50" data-title="Workaround 1: a proxy">
+        <div class="head">
+          <div>
+            <div class="eyebrow fix">Workaround 1</div>
+            <h2>A proxy the agent can actually call.</h2>
+          </div>
+          <p>
+            The Figma REST API takes an API key, so it works without a browser. I wrapped its
+            endpoints as MCP tools and put that proxy between the agent and Figma.
+          </p>
+        </div>
+        <div class="diagram">
+          <div class="chain">
+            <div class="node big">GitHub Agent</div>
+            <div class="wire"></div>
+            <div class="node big built">Figma MCP Proxy<small>custom, API key</small></div>
+            <div class="wire"></div>
+            <div class="node big">Figma<small>REST API</small></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="stop" data-w="1320" data-dy="70" data-title="Second result">
+        <div class="head">
+          <div>
+            <div class="eyebrow">With the proxy</div>
+            <h2>The next result looked like a real component.</h2>
+          </div>
+          <p>
+            Now the agent could read the Figma file, and the build got its structure: a selection
+            count, actions, a divider, a destructive action. The colors and type were still its
+            own.
+          </p>
+        </div>
+        <figure class="frame">
+          <div class="frame-label"><span>Second result</span><strong>structure, no design system</strong></div>
+          <img src="assets/proxy-result.png" width="1314" height="182" alt="Second generated bulk action bar: a white bar with 3 items selected, Deselect All, Download, Export, Archive, and Delete" />
+          <figcaption>Compare with the target: white instead of navy, and none of the system's tokens.</figcaption>
+        </figure>
+      </section>
+
+      <section class="stop" data-w="1420" data-dy="-60" data-title="The token blocker">
+        <div class="head">
+          <div>
+            <div class="eyebrow problem">Problem 2 / design tokens</div>
+            <h2>Structure came through. The design system did not.</h2>
+          </div>
+          <p>
+            The proxy could read files, walk nodes, and take screenshots. The variables endpoint
+            is enterprise only, so every token binding came back as an ID with no value behind it.
+          </p>
+        </div>
+        <div class="cols wide-right">
+          <div class="stack">
+            <div class="tag">What the proxy could expose</div>
+            <ul class="fan">
+              <li>read files <span class="state">works</span></li>
+              <li>view nodes <span class="state">works</span></li>
+              <li>screenshots <span class="state">works</span></li>
+              <li class="no">design tokens <span class="state">enterprise only</span></li>
+            </ul>
+          </div>
+          <figure class="frame">
+            <div class="frame-label"><span>What the agent saw</span><strong class="bad">IDs, no values</strong></div>
+            <img src="assets/token-bindings.png" width="1440" height="1143" alt="Table of Bulk action bar layers and properties, each bound to an unresolved VariableID" />
+          </figure>
+        </div>
+      </section>
+
+      <section class="stop" data-w="1480" data-dy="60" data-title="Workaround 2: a hard-coded map">
+        <div class="head">
+          <div>
+            <div class="eyebrow fix">Workaround 2</div>
+            <h2>A hard-coded token map.</h2>
+          </div>
+          <p>
+            I resolved a handful of variable IDs by hand and gave the proxy a lookup table. It
+            proved the idea. Five tokens cannot describe a design system.
+          </p>
+        </div>
+        <div class="cols top">
+          <div class="diagram">
+            <div class="tee">
+              <div class="node">GitHub Agent</div>
+              <div class="wire"></div>
+              <div class="node built">Figma MCP Proxy</div>
+              <div class="wire"></div>
+              <div class="node">Figma</div>
+              <div class="under"><div class="vwire built"></div></div>
+              <div class="node built under">hard-coded token map</div>
+            </div>
+          </div>
+          <figure class="frame">
+            <div class="frame-label"><span>The map</span><strong>5 tokens by hand</strong></div>
+            <img src="assets/token-map.png" width="1198" height="444" alt="Table mapping five token names to variable IDs and hex values" />
+          </figure>
+        </div>
+        <figure class="frame">
+          <div class="frame-label"><span>What came back</span><strong>closer, not there yet</strong></div>
+          <img src="assets/hardcoded-result.png" width="1414" height="282" alt="Generated bulk action bar: navy surface and yellow badge, serif type, no close button" />
+          <figcaption>The navy surface and yellow badge now come from real tokens. The typeface is still wrong and the close button is missing.</figcaption>
+        </figure>
+      </section>
+
+      <section class="stop" data-w="1500" data-dy="-50" data-title="Workaround 3: token sync plugin">
+        <div class="head">
+          <div>
+            <div class="eyebrow fix">Workaround 3</div>
+            <h2>A Figma plugin that syncs tokens to GitHub.</h2>
+          </div>
+          <p>
+            A plugin can read variables from inside Figma. Mine pushes them to
+            <code>tokens/radix/figma.variables.json</code> in a GitHub repo, and the proxy joins
+            that file with the REST data.
+          </p>
+        </div>
+        <div class="cols wide-left">
+          <div class="diagram">
+            <div class="tee">
+              <div class="node">GitHub Agent</div>
+              <div class="wire"></div>
+              <div class="node built">Figma MCP Proxy</div>
+              <div class="wire"></div>
+              <div class="node">Figma</div>
+              <div class="under"><div class="vwire built"></div></div>
+              <div class="node built left-of">Custom Figma plugin<small>manual trigger</small></div>
+              <div class="wire built wire-row"><span class="wire-label">sync</span></div>
+              <div class="node built under">GitHub token repo</div>
+            </div>
+          </div>
+          <figure class="frame">
+            <div class="frame-label"><span>The plugin</span><strong>Figma → GitHub</strong></div>
+            <img src="assets/token-sync-plugin.png" width="1440" height="1275" alt="Radix Token Sync plugin showing an out of sync status with Check Sync and Push Now buttons" />
+          </figure>
+        </div>
+      </section>
+
+      <section class="stop" data-w="1320" data-dy="40" data-title="One token source">
+        <div class="head">
+          <div>
+            <div class="eyebrow">Where chapter 1 lands</div>
+            <h2>One token source feeds the library and the agents.</h2>
+          </div>
+          <p>
+            The synced file now has two readers: the Radix component library, and the custom
+            Figma MCP that the agents call. Design access became infrastructure I could fix.
+          </p>
+        </div>
+        <div class="diagram">
+          <div class="chain flip">
+            <div class="node big built">Figma plugin</div>
+            <div class="wire built"></div>
+            <div class="node big built">GitHub token repo</div>
+            <div class="wire built" style="margin-right: 0;"></div>
+            <div class="branch">
+              <div class="chain"><div class="wire built"></div><div class="node big">Radix component library</div></div>
+              <div class="chain"><div class="wire built"></div><div class="node big built">Custom Figma MCP<small>agents</small></div></div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ============ Lane 2: getting the agent to build well ============ -->
+    <div class="lane" data-chapter="Chapter 2 / Getting the agent to build well">
+
+      <section class="stop chapter-stop" data-w="900" data-title="Chapter 2">
+        <div class="chapter-no">Chapter 2</div>
+        <h2>Getting the agent <span class="gradient-text">to build well.</span></h2>
+        <p>With the design in reach, the next problem was the agent itself.</p>
+      </section>
+
+      <section class="stop" data-w="1480" data-dy="-60" data-title="A bigger target">
+        <div class="head">
+          <div>
+            <div class="eyebrow">A bigger target</div>
+            <h2>From one component to a whole page.</h2>
+          </div>
+          <p>
+            The Correspondence landing page: tabs, search, a sortable table, pagination, and a
+            filter drawer with a date range.
+          </p>
+        </div>
+        <div class="pairs">
+          <figure class="frame target">
+            <div class="frame-label"><span>Figma target</span><strong>table</strong></div>
+            <img src="assets/page-target-table.png" width="1408" height="1058" alt="Figma design of the Correspondence page with a data table" />
+          </figure>
+          <figure class="frame target">
+            <div class="frame-label"><span>Figma target</span><strong>filter drawer</strong></div>
+            <img src="assets/page-target-drawer.png" width="1428" height="1056" alt="Figma design of the Correspondence page with the filter drawer open" />
+          </figure>
+        </div>
+      </section>
+
+      <section class="stop" data-w="1480" data-dy="70" data-title="The monolith">
+        <div class="head">
+          <div>
+            <div class="eyebrow problem">Problem 3 / the monolith</div>
+            <h2>One massive agent file did everything.</h2>
+          </div>
+          <p>
+            Planning, coding, browser checks, and visual verification were packed into a single
+            auto-build workflow. Every failure meant starting the whole run again.
+          </p>
+        </div>
+        <div class="cols wide-right">
+          <div class="stack">
+            <article class="station monolith">
+              <div class="station-top"><div class="tag">One agent / one massive file</div><img class="agent-icon" src="assets/copilot.png" width="600" height="600" alt="" /></div>
+              <h3>Auto-Build</h3>
+              <p>Every job packed into a single run and a single context.</p>
+              <div class="jobs">
+                <span>plan</span><span>code</span><span>browser checks</span><span>visual verify</span>
+              </div>
+              <code>Auto-Build Agent.md</code>
+            </article>
+            <ul class="ticks bad">
+              <li>consistently fails</li>
+              <li>takes very long</li>
+              <li>poor results</li>
+              <li>no insight along the way</li>
+            </ul>
+          </div>
+          <figure class="frame">
+            <div class="frame-label"><span>What one run produced</span><strong class="bad">far from the target</strong></div>
+            <img src="assets/monolith-result.png" width="1440" height="769" alt="Generated Correspondence page that differs from the design in layout, labels, and styling" />
+          </figure>
+        </div>
+      </section>
+
+      <section class="stop" data-w="1500" data-dy="-50" data-title="Plan, build, verify">
+        <div class="head">
+          <div>
+            <div class="eyebrow fix">The turning point</div>
+            <h2>Three agents with explicit handoffs.</h2>
+          </div>
+          <p>
+            Each agent owns one kind of decision and hands off a concrete output. Commits make
+            progress visible, and a failure restarts one station instead of the whole run.
+          </p>
+        </div>
+        <div class="stations">
+          <article class="station">
+            <div class="station-top"><div class="tag">Agent 1</div><img class="agent-icon" src="assets/copilot.png" width="600" height="600" alt="" /></div>
+            <h3>Plan</h3>
+            <p>Gathers the Figma source, maps it onto the component library, and writes the plan folder.</p>
+            <code>figma-plan.md</code>
+          </article>
+          <div class="wire"></div>
+          <article class="station build">
+            <div class="station-top"><div class="tag">Agent 2</div><img class="agent-icon" src="assets/copilot.png" width="600" height="600" alt="" /></div>
+            <h3>Build</h3>
+            <p>Implements against the plan on a branch. Reads the plan and never edits it.</p>
+            <code>figma-build.md</code>
+          </article>
+          <div class="wire"></div>
+          <article class="station verify">
+            <div class="station-top"><div class="tag">Agent 3</div><img class="agent-icon" src="assets/copilot.png" width="600" height="600" alt="" /></div>
+            <h3>Verify</h3>
+            <p>Renders every state, scores it against the reference, then passes or sends feedback.</p>
+            <code>figma-verify.md</code>
+          </article>
+          <div class="loop" aria-hidden="true"></div>
+          <div class="loop-label">feedback until pass / max 8 rounds / 3% frame mismatch threshold</div>
+        </div>
+      </section>
+
+      <section class="stop" data-w="1480" data-dy="60" data-title="Pixel-level diffs">
+        <div class="head">
+          <div>
+            <div class="eyebrow">How the verifier sees it</div>
+            <h2>Verification is a pixel-level measurement.</h2>
+          </div>
+          <p>
+            The Verify agent renders the built page, overlays it on the Figma reference, and
+            marks every pixel that differs. That turns “it feels off” into a number and a place
+            to look.
+          </p>
+        </div>
+        <div class="cols wide-left">
+          <figure class="frame">
+            <div class="frame-label"><span>Diff / landing page, default state</span><strong class="bad">round 1 / fail</strong></div>
+            <img src="assets/pixel-diff-round1.png" width="2880" height="2048" alt="Pixel diff of the Correspondence landing page: differing pixels highlighted in red and yellow over text, row borders, and controls" />
+            <figcaption>Highlighted pixels are where the build and the reference disagree.</figcaption>
+          </figure>
+          <div class="stack">
+            <ul class="fan">
+              <li>frame mismatch <span class="state" style="color: var(--red);">4.27%</span></li>
+              <li>threshold for this run <span class="state" style="color: var(--muted-strong);">1%</span></li>
+              <li>worst of 4 states <span class="state" style="color: var(--red);">4.56%</span></li>
+              <li class="no">result <span class="state">sent back to build</span></li>
+            </ul>
+            <ul class="ticks">
+              <li>doubled text shows type that is offset or sized differently</li>
+              <li>solid outlines show borders the reference has and the build lacks, or the reverse</li>
+              <li>the same report feeds the builder’s next round</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section class="stop" data-w="1480" data-dy="-40" data-title="The live MCP keeps failing">
+        <div class="head">
+          <div>
+            <div class="eyebrow problem">Problem 4 / the live MCP</div>
+            <h2>Recognizably the page. But the MCP kept failing.</h2>
+          </div>
+          <p>
+            The three agents were still calling Figma live through the MCP during the run, and
+            that was the weak link. When the context came back broken or cut short, the build
+            filled the gaps.
+          </p>
+        </div>
+        <ul class="fan trio">
+          <li class="no">MCP calls <span class="state">fail often</span></li>
+          <li class="no">Figma API <span class="state">rate limited</span></li>
+          <li class="no">token context <span class="state">too large, truncated</span></li>
+        </ul>
+        <div class="pairs">
+          <figure class="frame">
+            <div class="frame-label"><span>Built</span><strong class="bad">table</strong></div>
+            <img src="assets/pass1-table.png" width="1440" height="1024" alt="First pass of the Correspondence table" />
+            <figcaption>Missing the table border, the Default View chip, and the page-size dropdown.</figcaption>
+          </figure>
+          <figure class="frame">
+            <div class="frame-label"><span>Built</span><strong class="bad">filter drawer</strong></div>
+            <img src="assets/pass1-drawer.png" width="1440" height="1024" alt="First pass of the filter drawer" />
+            <figcaption>Search box out of place, and the date pickers lost their icons.</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section class="stop" data-w="1400" data-dy="60" data-title="The Figma harvest">
+        <div class="head">
+          <div>
+            <div class="eyebrow fix">The fix / Figma harvest</div>
+            <h2>Grab all the Figma context before the agent runs.</h2>
+          </div>
+          <p>
+            The harvest is a deterministic step. It pulls everything the agents need from Figma
+            and writes it to disk before any agent starts. After that,
+            <strong>we no longer need the Figma MCP at all.</strong>
+          </p>
+        </div>
+        <div class="chain flip" style="align-items: stretch;">
+          <article class="card gone" style="flex: 1 1 0;">
+            <div class="tag">Before / live Figma MCP</div>
+            <h3>Ask Figma during the run.</h3>
+            <ul class="ticks bad">
+              <li>calls fail often</li>
+              <li>Figma rate limits</li>
+              <li>token context too large, then truncated</li>
+            </ul>
+          </article>
+          <div class="wire" style="align-self: center;"></div>
+          <article class="card next" style="flex: 1 1 0;">
+            <div class="tag">Now / Figma harvest</div>
+            <h3>Capture once, before the agents.</h3>
+            <ul class="ticks good">
+              <li>design tree, screenshots, tokens, and component inventory written to disk</li>
+              <li>deterministic: the same inputs every run</li>
+              <li>plan, build, and verify read files, with no Figma MCP</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section class="stop" data-w="1480" data-dy="-60" data-title="Almost perfect">
+        <div class="head">
+          <div>
+            <div class="eyebrow">After the harvest</div>
+            <h2>Almost perfect.</h2>
+          </div>
+          <ul class="ticks bad">
+            <li>the icons are wrong: look at the sort arrows and the heart on the drawer button</li>
+            <li>some components are made up on the spot instead of taken from the library</li>
+          </ul>
+        </div>
+        <div class="pairs">
+          <figure class="frame">
+            <div class="frame-label"><span>Built</span><strong>table</strong></div>
+            <img src="assets/pass2-table.png" width="1440" height="1024" alt="Correspondence table built after the harvest, close to the design with wrong sort icons" />
+          </figure>
+          <figure class="frame">
+            <div class="frame-label"><span>Built</span><strong>filter drawer</strong></div>
+            <img src="assets/pass2-drawer.png" width="1440" height="1024" alt="Filter drawer built after the harvest, close to the design with an extra heart icon on the button" />
+          </figure>
+        </div>
+      </section>
+
+      <section class="stop" data-w="1560" data-dy="50" data-title="Figma Code Connect">
+        <div class="head">
+          <div>
+            <div class="eyebrow fix">Next / Figma Code Connect</div>
+            <h2>Code Connect ties Figma components to the real code.</h2>
+          </div>
+          <p>
+            <code>code-connect.json</code> maps each Figma component set to the React component
+            that implements it. The builder picks the real icon and the real component instead
+            of inventing one.
+          </p>
+        </div>
+        <div class="link3 flip">
+          <figure class="frame">
+            <div class="frame-label"><span>Figma</span><strong>a component set in the design system</strong></div>
+            <div class="shot-wrap">
+              <img src="assets/figma-design-system.png" width="1440" height="904" alt="Radix design system file in Figma, open on the Buttons page with the Button group component set" />
+              <span class="hl" style="left: 54%; top: 36.5%; width: 20.5%; height: 20.5%;"></span>
+            </div>
+            <figcaption>Every component set in Figma has a stable key.</figcaption>
+          </figure>
+          <div class="wire built"><span class="wire-label">key → import</span></div>
+          <figure class="frame">
+            <div class="frame-label"><span>code-connect.json</span><strong class="good">the map</strong></div>
+            <div class="shot-wrap">
+              <img src="assets/code-connect-json.png" width="968" height="676" alt="code-connect.json: Button, Checkbox, Drawer, and Avatar each map a Figma component key to a React import path" />
+              <span class="hl" style="left: 5.5%; top: 7.5%; width: 82%; height: 21%;"></span>
+            </div>
+            <figcaption>Each entry pairs that key with the React component to import.</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section class="stop" data-w="1480" data-dy="-50" data-title="The final result">
+        <div class="head">
+          <div>
+            <div class="eyebrow fix">The result</div>
+            <h2>The final result.</h2>
+          </div>
+          <p>
+            Harvested Figma context, three looped agents, and the Code Connect map. Figma on the
+            left, what the agents built on the right.
+          </p>
+        </div>
+        <div class="pairs">
+          <figure class="frame target">
+            <div class="frame-label"><span>Figma target</span><strong>table</strong></div>
+            <img src="assets/page-target-table.png" width="1408" height="1058" alt="Figma target: Correspondence table" />
+          </figure>
+          <figure class="frame">
+            <div class="frame-label"><span>Built</span><strong class="good">table</strong></div>
+            <img src="assets/final-table.png" width="1440" height="1024" alt="Built Correspondence table, closely matching the design" />
+          </figure>
+        </div>
+      </section>
+
+      <section class="stop" data-w="1480" data-dy="50" data-title="The final result: filter drawer">
+        <div class="head">
+          <div>
+            <div class="eyebrow fix">The result</div>
+            <h2>And the filter drawer.</h2>
+          </div>
+          <p>The same run, with the drawer open: checkboxes, the date range, and the action button.</p>
+        </div>
+        <div class="pairs">
+          <figure class="frame target">
+            <div class="frame-label"><span>Figma target</span><strong>filter drawer</strong></div>
+            <img src="assets/page-target-drawer.png" width="1428" height="1056" alt="Figma target: filter drawer" />
+          </figure>
+          <figure class="frame">
+            <div class="frame-label"><span>Built</span><strong class="good">filter drawer</strong></div>
+            <img src="assets/final-drawer.png" width="1440" height="1024" alt="Built filter drawer, closely matching the design" />
+          </figure>
+        </div>
+      </section>
+    </div>
+
+    <!-- ============ Lane 3: lessons learned ============ -->
+    <div class="lane" data-chapter="Chapter 3 / Lessons learned">
+
+      <section class="stop chapter-stop" data-w="900" data-title="Chapter 3">
+        <div class="chapter-no">Chapter 3</div>
+        <h2>Lessons <span class="gradient-text">learned.</span></h2>
+        <p>Two things I would do from the start next time.</p>
+      </section>
+
+      <section class="stop" data-w="1400" data-dy="-50" data-title="Lesson 1: small agents, looped">
+        <div class="head">
+          <div>
+            <div class="eyebrow">Lesson 1</div>
+            <h2>Break the work into small, task-oriented agents. Then loop them.</h2>
+          </div>
+          <p>
+            One agent per task, with a clear handoff between them. Failures stay small, progress
+            stays visible, and the loop keeps going until the result passes.
+          </p>
+        </div>
+        <div class="diagram">
+          <div class="stack" style="align-items: center;">
+            <div class="chain" style="align-self: stretch;">
+              <div class="node icon built"><img src="assets/copilot.png" width="600" height="600" alt="" />Plan</div>
+              <div class="wire"></div>
+              <div class="node icon built"><img src="assets/copilot.png" width="600" height="600" alt="" />Build</div>
+              <div class="wire"></div>
+              <div class="node icon built"><img src="assets/copilot.png" width="600" height="600" alt="" />Verify</div>
+            </div>
+            <span class="loop-pill">↻ loop build and verify until it passes</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="stop" data-w="1400" data-dy="50" data-title="Lesson 2: make it deterministic">
+        <div class="head">
+          <div>
+            <div class="eyebrow">Lesson 2</div>
+            <h2>If something can be deterministic, <span class="gradient-text">make it deterministic.</span></h2>
+          </div>
+          <p>
+            The harvest replaced a live MCP that failed often with a step that produces the same
+            files every time. Keep the agents for the parts that need judgment.
+          </p>
+        </div>
+        <div class="diagram">
+          <div class="chain">
+            <div class="node big built">Figma harvest<small>deterministic, runs first</small></div>
+            <div class="wire built"></div>
+            <div class="node big">Plan, build, verify<small>agents, looped</small></div>
+          </div>
+        </div>
+        <div class="legend">
+          <span class="key"><kbd>O</kbd> see the whole map</span>
+        </div>
+      </section>
+    </div>
+  </div>
+</main>
+
+<div id="minimap" aria-label="Canvas minimap">
+  <div id="minimap-inner"><div id="mm-view"></div></div>
+</div>
+
+<footer class="bottombar" aria-label="Canvas navigation">
+  <div class="progress">
+    <strong id="stop-number">01</strong>
+    <span>/</span>
+    <span id="stop-title">The factory line</span>
+  </div>
+  <div class="dots" id="dots" aria-label="Choose a stop"></div>
+  <div class="controls">
+    <span class="hint">arrows to follow / drag to wander</span>
+    <button class="btn" id="overview" type="button" aria-label="Show the whole map">Map</button>
+    <button class="btn" id="prev" type="button" aria-label="Previous stop">←</button>
+    <button class="btn" id="next" type="button" aria-label="Next stop">→</button>
+  </div>
+</footer>
+
+<script>
+  (function () {
+    const stage = document.getElementById("stage");
+    const world = document.getElementById("world");
+    const svg = document.getElementById("paths");
+    const lanes = Array.from(world.querySelectorAll(".lane"));
+    const stops = Array.from(world.querySelectorAll(".stop"));
+    const dotsEl = document.getElementById("dots");
+    const mmInner = document.getElementById("minimap-inner");
+    const mmView = document.getElementById("mm-view");
+    const numberEl = document.getElementById("stop-number");
+    const titleEl = document.getElementById("stop-title");
+    const chapterEl = document.getElementById("chapter-label");
+    const prevBtn = document.getElementById("prev");
+    const nextBtn = document.getElementById("next");
+    const overviewBtn = document.getElementById("overview");
+    const SVGNS = "http://www.w3.org/2000/svg";
+
+    let rects = [];
+    let bounds = { x: 0, y: 0, w: 1, h: 1 };
+    let cam = { x: 0, y: 0, s: 1 };
+    let current = 0;
+    let furthest = 0;
+    let mode = "stop"; // stop | overview | free
+    let narrow = false;
+    let pathEls = [];
+    const dots = [];
+    const mmStops = [];
+
+    stops.forEach((stop, i) => {
+      stop.dataset.index = i;
+      const lane = stop.parentElement;
+      if (!stop.dataset.chapter) stop.dataset.chapter = lane.dataset.chapter;
+
+      const dot = document.createElement("button");
+      dot.type = "button";
+      dot.className = "dot" + (stop.classList.contains("chapter-stop") ? " chapter-start" : "");
+      dot.setAttribute("aria-label", "Go to stop " + (i + 1) + ": " + stop.dataset.title);
+      dot.addEventListener("click", () => goTo(i));
+      dotsEl.appendChild(dot);
+      dots.push(dot);
+
+      const mm = document.createElement("button");
+      mm.type = "button";
+      mm.className = "mm-stop";
+      mm.setAttribute("aria-label", stop.dataset.title);
+      mm.addEventListener("click", () => goTo(i));
+      mmInner.appendChild(mm);
+      mmStops.push(mm);
+    });
+
+    function layout() {
+      narrow = window.innerWidth < 720;
+      world.classList.toggle("narrow", narrow);
+      const gapX = narrow ? 130 : 280;
+      const laneGap = narrow ? 240 : 460;
+      rects = [];
+      let y = 0;
+      let maxX = 0;
+
+      lanes.forEach((lane) => {
+        const items = Array.from(lane.children);
+        items.forEach((el) => {
+          el.style.width = (narrow ? 380 : Number(el.dataset.w || 1200)) + "px";
+        });
+        const hs = items.map((el) => el.offsetHeight);
+        const dys = items.map((el) => (narrow ? 0 : Number(el.dataset.dy || 0)));
+        let above = 0;
+        let below = 0;
+        items.forEach((el, i) => {
+          if (narrow) {
+            below = Math.max(below, hs[i]);
+          } else {
+            above = Math.max(above, hs[i] / 2 - dys[i]);
+            below = Math.max(below, hs[i] / 2 + dys[i]);
+          }
+        });
+        const cy = y + above;
+        let x = 0;
+        items.forEach((el, i) => {
+          const w = el.offsetWidth;
+          const top = narrow ? y : cy + dys[i] - hs[i] / 2;
+          el.style.left = x + "px";
+          el.style.top = top + "px";
+          rects[Number(el.dataset.index)] = { x: x, y: top, w: w, h: hs[i], lane: lane, laneTop: cy - above, laneBottom: cy + below };
+          x += w + gapX;
+        });
+        maxX = Math.max(maxX, x - gapX);
+        y = cy + below + laneGap;
+      });
+
+      bounds = { x: 0, y: 0, w: maxX, h: y - laneGap };
+      world.style.width = bounds.w + "px";
+      world.style.height = bounds.h + "px";
+      svg.setAttribute("width", bounds.w);
+      svg.setAttribute("height", bounds.h);
+      drawPaths(laneGap);
+      drawMinimap();
+    }
+
+    function drawPaths(laneGap) {
+      svg.textContent = "";
+      pathEls = [];
+      for (let i = 0; i < rects.length - 1; i++) {
+        const a = rects[i];
+        const b = rects[i + 1];
+        let d;
+        let tip;
+        if (a.lane === b.lane) {
+          const x1 = a.x + a.w + 18;
+          const y1 = a.y + a.h / 2;
+          const x2 = b.x - 26;
+          const y2 = b.y + b.h / 2;
+          const k = (x2 - x1) * 0.55;
+          d = "M" + x1 + " " + y1 + " C" + (x1 + k) + " " + y1 + " " + (x2 - k) + " " + y2 + " " + x2 + " " + y2;
+          tip = (x2 + 16) + "," + y2 + " " + (x2 - 4) + "," + (y2 - 10) + " " + (x2 - 4) + "," + (y2 + 10);
+        } else {
+          const x1 = a.x + a.w / 2;
+          const y1 = a.y + a.h + 18;
+          const x2 = b.x + b.w / 2;
+          const y2 = b.y - 28;
+          const ym = (a.laneBottom + b.laneTop) / 2;
+          const r = Math.min(90, laneGap / 3);
+          const dir = x2 < x1 ? -1 : 1;
+          d = "M" + x1 + " " + y1 + " L" + x1 + " " + (ym - r) + " Q" + x1 + " " + ym + " " + (x1 + dir * r) + " " + ym +
+            " L" + (x2 - dir * r) + " " + ym + " Q" + x2 + " " + ym + " " + x2 + " " + (ym + r) + " L" + x2 + " " + y2;
+          tip = x2 + "," + (y2 + 16) + " " + (x2 - 10) + "," + (y2 - 4) + " " + (x2 + 10) + "," + (y2 - 4);
+        }
+        const path = document.createElementNS(SVGNS, "path");
+        path.setAttribute("d", d);
+        path.setAttribute("class", "path");
+        const head = document.createElementNS(SVGNS, "polygon");
+        head.setAttribute("points", tip);
+        head.setAttribute("class", "path-tip");
+        svg.appendChild(path);
+        svg.appendChild(head);
+        pathEls.push([path, head]);
+      }
+    }
+
+    function drawMinimap() {
+      const m = 214 / bounds.w;
+      mmInner.style.width = "214px";
+      mmInner.style.height = Math.max(40, bounds.h * m) + "px";
+      mmInner.dataset.m = m;
+      rects.forEach((r, i) => {
+        const el = mmStops[i];
+        el.style.left = r.x * m + "px";
+        el.style.top = r.y * m + "px";
+        el.style.width = r.w * m + "px";
+        el.style.height = r.h * m + "px";
+      });
+    }
+
+    function apply(animate) {
+      world.classList.toggle("no-anim", !animate);
+      mmView.classList.toggle("no-anim", !animate);
+      world.style.transform = "translate(" + cam.x + "px," + cam.y + "px) scale(" + cam.s + ")";
+      const m = Number(mmInner.dataset.m || 0);
+      mmView.style.left = (-cam.x / cam.s) * m + "px";
+      mmView.style.top = (-cam.y / cam.s) * m + "px";
+      mmView.style.width = (stage.clientWidth / cam.s) * m + "px";
+      mmView.style.height = (stage.clientHeight / cam.s) * m + "px";
+    }
+
+    function frame(r, opts) {
+      opts = opts || {};
+      const vw = stage.clientWidth;
+      const vh = stage.clientHeight;
+      const px = narrow ? 16 : 64;
+      const py = narrow ? 20 : 44;
+      let s;
+      if (narrow && !opts.whole) {
+        s = Math.min((vw - px * 2) / r.w, 1.4);
+      } else {
+        s = Math.min((vw - px * 2) / r.w, (vh - py * 2) / r.h, opts.max || 1.35);
+      }
+      cam.s = s;
+      cam.x = (vw - r.w * s) / 2 - r.x * s;
+      cam.y = r.h * s > vh - py * 2 ? py - r.y * s : (vh - r.h * s) / 2 - r.y * s;
+    }
+
+    function syncUi() {
+      furthest = Math.max(furthest, current);
+      stops.forEach((el, i) => el.classList.toggle("current", i === current));
+      dots.forEach((el, i) => {
+        el.classList.toggle("active", i === current);
+        el.classList.toggle("seen", i < current);
+        el.setAttribute("aria-current", i === current ? "true" : "false");
+      });
+      mmStops.forEach((el, i) => {
+        el.classList.toggle("active", i === current);
+        el.classList.toggle("seen", i < current);
+      });
+      pathEls.forEach((pair, i) => {
+        pair[0].classList.toggle("done", i < current);
+        pair[1].classList.toggle("done", i < current);
+      });
+      world.classList.toggle("touring", mode === "stop");
+      numberEl.textContent = String(current + 1).padStart(2, "0");
+      titleEl.textContent = stops[current].dataset.title;
+      chapterEl.textContent = stops[current].dataset.chapter;
+      prevBtn.disabled = current === 0 && mode === "stop";
+      nextBtn.disabled = current === stops.length - 1 && mode === "stop";
+    }
+
+    function goTo(index, animate) {
+      current = Math.max(0, Math.min(index, stops.length - 1));
+      mode = "stop";
+      frame(rects[current]);
+      apply(animate !== false);
+      syncUi();
+      try {
+        history.replaceState(null, "", "#stop-" + (current + 1));
+      } catch (err) {
+        /* hash updates are a convenience only */
+      }
+    }
+
+    function showOverview() {
+      if (mode === "overview") return goTo(current);
+      mode = "overview";
+      frame(bounds, { whole: true, max: 1 });
+      apply(true);
+      syncUi();
+    }
+
+    function next() {
+      if (mode !== "stop") return goTo(current);
+      if (current < stops.length - 1) goTo(current + 1);
+    }
+
+    function prev() {
+      if (mode !== "stop") return goTo(current);
+      if (current > 0) goTo(current - 1);
+    }
+
+    function wander() {
+      if (mode !== "free") {
+        mode = "free";
+        syncUi();
+      }
+    }
+
+    function zoomAt(cx, cy, factor) {
+      const box = stage.getBoundingClientRect();
+      const px = cx - box.left;
+      const py = cy - box.top;
+      const s = Math.max(0.04, Math.min(4, cam.s * factor));
+      const k = s / cam.s;
+      cam.x = px - (px - cam.x) * k;
+      cam.y = py - (py - cam.y) * k;
+      cam.s = s;
+      wander();
+      apply(false);
+    }
+
+    function worldRect(el) {
+      const box = stage.getBoundingClientRect();
+      const r = el.getBoundingClientRect();
+      return {
+        x: (r.left - box.left - cam.x) / cam.s,
+        y: (r.top - box.top - cam.y) / cam.s,
+        w: r.width / cam.s,
+        h: r.height / cam.s,
+      };
+    }
+
+    /* ---- pointer: drag to pan, pinch to zoom, tap to travel ---- */
+    const pointers = new Map();
+    let moved = 0;
+    let downTarget = null;
+    let pinchDist = 0;
+
+    stage.addEventListener("pointerdown", (e) => {
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pointers.size === 1) {
+        moved = 0;
+        downTarget = e.target;
+      } else if (pointers.size === 2) {
+        const p = Array.from(pointers.values());
+        pinchDist = Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y);
+      }
+    });
+
+    stage.addEventListener("pointermove", (e) => {
+      const last = pointers.get(e.pointerId);
+      if (!last) return;
+      const dx = e.clientX - last.x;
+      const dy = e.clientY - last.y;
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pointers.size === 1) {
+        moved += Math.abs(dx) + Math.abs(dy);
+        if (moved < 6) return;
+        if (!stage.classList.contains("dragging")) {
+          stage.classList.add("dragging");
+          try { stage.setPointerCapture(e.pointerId); } catch (err) { /* optional */ }
+        }
+        cam.x += dx;
+        cam.y += dy;
+        wander();
+        apply(false);
+      } else if (pointers.size === 2) {
+        moved = 99;
+        const p = Array.from(pointers.values());
+        const dist = Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y);
+        if (pinchDist > 0) zoomAt((p[0].x + p[1].x) / 2, (p[0].y + p[1].y) / 2, dist / pinchDist);
+        pinchDist = dist;
+      }
+    });
+
+    function endPointer(e) {
+      const wasTap = pointers.size === 1 && moved < 6 && e.type === "pointerup";
+      pointers.delete(e.pointerId);
+      stage.classList.remove("dragging");
+      if (!wasTap || !downTarget) return;
+      const stop = downTarget.closest(".stop");
+      if (!stop) return;
+      const index = Number(stop.dataset.index);
+      const img = downTarget.closest(".frame img, .node.thumb img");
+      if (index === current && mode === "stop" && img) {
+        mode = "free";
+        frame(worldRect(img), { whole: true, max: 3 });
+        apply(true);
+        syncUi();
+        stops[current].classList.add("current");
+      } else if (index !== current || mode !== "stop") {
+        goTo(index);
+      }
+    }
+
+    stage.addEventListener("pointerup", endPointer);
+    stage.addEventListener("pointercancel", endPointer);
+
+    stage.addEventListener(
+      "wheel",
+      (e) => {
+        e.preventDefault();
+        if (e.ctrlKey || e.metaKey) {
+          zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * 0.01));
+        } else {
+          cam.x -= e.deltaX;
+          cam.y -= e.deltaY;
+          wander();
+          apply(false);
+        }
+      },
+      { passive: false }
+    );
+
+    prevBtn.addEventListener("click", prev);
+    nextBtn.addEventListener("click", next);
+    overviewBtn.addEventListener("click", showOverview);
+
+    document.addEventListener("keydown", (e) => {
+      if (e.altKey || e.ctrlKey || e.metaKey) return;
+      const k = e.key;
+      if (["ArrowRight", "ArrowDown", "PageDown", " "].includes(k)) {
+        e.preventDefault();
+        next();
+      } else if (["ArrowLeft", "ArrowUp", "PageUp"].includes(k)) {
+        e.preventDefault();
+        prev();
+      } else if (k === "Home") {
+        goTo(0);
+      } else if (k === "End") {
+        goTo(stops.length - 1);
+      } else if (k === "o" || k === "O" || k === "0") {
+        showOverview();
+      } else if (k === "Escape") {
+        goTo(current);
+      } else if (k === "+" || k === "=") {
+        zoomAt(window.innerWidth / 2, window.innerHeight / 2, 1.25);
+      } else if (k === "-") {
+        zoomAt(window.innerWidth / 2, window.innerHeight / 2, 0.8);
+      }
+    });
+
+    function relayout() {
+      layout();
+      if (mode === "overview") {
+        frame(bounds, { whole: true, max: 1 });
+        apply(false);
+        syncUi();
+      } else {
+        goTo(current, false);
+      }
+    }
+
+    let resizeTimer = 0;
+    window.addEventListener("resize", () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(relayout, 120);
+    });
+    window.addEventListener("load", relayout);
+
+    const asked = Number((location.hash || "").replace("#stop-", "")) - 1;
+    layout();
+    goTo(Number.isInteger(asked) && asked >= 0 ? asked : 0, false);
+  })();
+</script>
