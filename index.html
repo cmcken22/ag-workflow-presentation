@@ -716,6 +716,11 @@
   .extract { display: grid; grid-template-columns: 1fr 120px 1.15fr; align-items: center; }
   .extract > * { min-width: 0; }
 
+  .feedback-flow { overflow: hidden; }
+  .feedback-flow .chain { width: 100%; }
+  .feedback-flow .node.big { min-width: 0; flex: 1 1 0; padding: 26px 12px; font-size: 18px; }
+  .feedback-flow .wire { flex: 0 1 36px; min-width: 24px; margin-inline: 6px; }
+
   .editor {
     overflow: hidden;
     border: 1px solid var(--line-bright);
@@ -1524,7 +1529,7 @@
       <section class="stop chapter-stop" data-w="900" data-title="Chapter 3">
         <div class="chapter-no">Chapter 3</div>
         <h2>Lessons <span class="gradient-text">learned.</span></h2>
-        <p>Two things I would do from the start next time.</p>
+        <p>Three things I would do from the start next time.</p>
       </section>
 
       <section class="stop" data-w="1400" data-dy="-50" data-title="Lesson 1: small agents, looped">
@@ -1600,6 +1605,46 @@ Read <span class="c-s">./figma-plan/</span> from disk.</pre>
           </div>
         </div>
         <p class="fine">Illustrative code, simplified to show the move.</p>
+      </section>
+
+      <section class="stop" data-w="1400" data-dy="-40" data-title="Lesson 3: keep a feedback file">
+        <div class="head">
+          <div>
+            <div class="eyebrow">Lesson 3</div>
+            <h2>Give the next run a memory.</h2>
+          </div>
+          <p>
+            Maintain a <code>FEED_BACK.md</code> file in the repo. After each run, record what
+            failed, what the verifier caught, and what the next agent must do differently. Every
+            new run reads it before planning.
+          </p>
+        </div>
+        <div class="extract">
+          <figure class="editor good">
+            <div class="editor-bar"><i></i><i></i><i></i><span>FEED_BACK.md</span><em class="good">shared memory</em></div>
+<pre><span class="c-h">## Patterns to keep</span>
+
+<span class="lift">- Use existing components and Code Connect mappings.
+- Match icon-only controls to the design treatment.
+- Keep shared layout insets consistent.</span>
+
+<span class="c-h">## Next run</span>
+Read this file before planning.
+Apply the guidance across plan, build, and verify.</pre>
+            <figcaption class="good">Generic, actionable guidance benefits every agent in the workflow.</figcaption>
+          </figure>
+          <div class="wire built"><span class="wire-label">read before plan</span></div>
+          <div class="diagram feedback-flow">
+            <div class="chain flip">
+              <div class="node big">Past runs<small>shared lessons</small></div>
+              <div class="wire built"></div>
+              <div class="node big built">FEED_BACK.md<small>guidance for every agent</small></div>
+              <div class="wire built"></div>
+              <div class="node big">Next run<small>known misses become checks</small></div>
+            </div>
+          </div>
+        </div>
+        <p class="fine">The file is not a transcript. It is a growing list of corrections the agents can apply.</p>
       </section>
 
       <section class="stop" data-w="1480" data-dy="-40" data-title="Live demo: Jira integration">
